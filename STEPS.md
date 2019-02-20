@@ -161,7 +161,7 @@ it( "can render the about page", function(){
 
 ### 2.10 Assignment: Add a Links page
 
-### 2.11 Assignment: Change `prc.welcome` in the `handlers/main.cfc` and update the integration tests to pass.
+### 2.11 Assignment: Change prc.welcome and update test to pass.
 
 ## 3 - Layouts
 
@@ -198,27 +198,6 @@ it( "can render the about page", function(){
         <main role="main" class="container">
             #renderView()#
         </main>
-
-        <footer class="border-top py-3 mt-5">
-		<div class="container">
-			<p class="float-right">
-				<a href="##"><i class="fas fa-arrow-up"></i> Back to top</a>
-			</p>
-
-			<div class="badge badge-info">
-				#getSetting( "environment" )#
-			</div>
-
-			<p>
-				<a href="http://www.coldbox.org">ColdBox Platform</a> is a copyright-trademark software by
-				<a href="http://www.ortussolutions.com">Ortus Solutions, Corp</a>
-			</p>
-			<p>
-				Design thanks to
-				<a href="http://getbootstrap.com/">Twitter Boostrap</a>
-			</p>
-		</div>
-	</footer>
 
         <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
@@ -1317,7 +1296,7 @@ component extends="tests.resources.BaseIntegrationSpec" appMapping="/"{
 			});
 
 			it( "can logout a user", function(){
-				var event = get( event="sessions.delete" );
+				var event = delete( route="/logout" );
 				// expectations go here.
 				expect( getInstance( "authenticationService@cbauth" ).isLoggedIn() ).toBeFalse();
 				expect( event.getValue( "relocate_URI") ).toBe( "/" );
@@ -1403,7 +1382,7 @@ Replace the Create function with the following code
 property name="auth" inject="authenticationService@cbauth";
 
 function create( event, rc, prc ) {
-    var user = populateModel( "User" );
+    var user = populateModel( getInstance( "User" ) );
     userService.create( user );
     auth.login( user );
     relocate( uri = "/" );
@@ -1428,24 +1407,39 @@ migrate create create_rants_table
 
 ```js
 component {
-    
-    function up( schema, queryBuilder ) {
+
+    function up( schema ) {
+        queryExecute( "
+            CREATE TABLE `rants` (
+                `id` INTEGER UNSIGNED NOT NULL AUTO_INCREMENT,
+                `body` TEXT NOT NULL,
+                `createdDate` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `modifiedDate` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                `userId` INTEGER UNSIGNED NOT NULL,
+                CONSTRAINT `pk_rants_id` PRIMARY KEY (`id`),
+                CONSTRAINT `fk_rants_userId` FOREIGN KEY (`userId`) REFERENCES `users` (`id`) ON UPDATE CASCADE ON DELETE CASCADE
+            )
+        " );
+
+        /**
         schema.create( "rants", function( table ){
             table.increments( "id" );
             table.text( "body" );
             table.timestamp( "createdDate" );
             table.timestamp( "modifiedDate" );
-            table.unsignedInteger( "userId" );
             table.foreignKey( "userId" ).references( "id" ).onTable( "users" );
         } );
+
+
+        **/
     }
 
-    function down( schema, queryBuilder ) {
-        schema.drop( "rants" );
+    function down( schema ) {
+        queryExecute( "DROP TABLE `rants`" );
+        // schema.drop( "rants" );
     }
 
 }
-
 ```
 
 #### 10.1.2 - Now, migrate your rants
@@ -1466,7 +1460,7 @@ Let's open the model and modify it a bit
 
 ```js
 /**
-* I am a new Rant Object
+* I am a new Model Object
 */
 component accessors="true"{
 
@@ -1474,36 +1468,33 @@ component accessors="true"{
 	property name="userService" inject;
 	
 	// Properties
-	property name="id"           type="string" default = "";
-	property name="body"         type="string" default = "";
+	property name="id"           type="string";
+	property name="body"         type="string";
 	property name="createdDate"  type="date";
 	property name="modifiedDate" type="date";
-	property name="userID"       type="string" default = "";
+	property name="userID"       type="string";
 	
 
 	/**
 	 * Constructor
 	 */
 	Rant function init(){
-		variables.createdDate = now();
 		return this;
+	}
+
+	/**
+	 * Verify if instance has been loaded or not
+	 */
+	boolean function isLoaded(){
+		return ( !isNull( variables.id ) && len( variables.id ) );
 	}
 	
 	/**
-	* getUser
-	*/
+	 * Get the related user
+	 */
 	function getUser(){
-		// Lazy loading the relationship
-		return userService.retrieveUserById( getuserId() );
+		return userService.retrieveUserById( getUserId() );
 	}
-
-	/**
-	* isLoaded
-	*/
-	boolean function isLoaded(){
-		return( !isNull( variables.id ) && len( variables.id ) );
-	}
-
 
 }
 ```
@@ -1511,72 +1502,16 @@ component accessors="true"{
 Work on the unit test, what will you test?
 
 ```js
-/**
-* The base model test case will use the 'model' annotation as the instantiation path
-* and then create it, prepare it for mocking and then place it in the variables scope as 'model'. It is your
-* responsibility to update the model annotation instantiation path and init your model.
-*/
-component extends="tests.resources.BaseIntegrationSpec"{
-	
-	property name="query" 		inject="provider:QueryBuilder@qb";
-	property name="bcrypt" 		inject="@BCrypt";
-
-	/*********************************** LIFE CYCLE Methods ***********************************/
-
-	function beforeAll(){
-		super.beforeAll();
-
-		model = getInstance( "Rant" );
-		
-		cleanUserFixture();
-		testUserId = query.from( "users" )
-			.insert( values = {
-				username : "testuser",
-				email : "testuser@tests.com",
-				password : bcrypt.hashPassword( "password" )
-			} ).result.generatedKey;
-
-		model.setUserId( testUserId );
-	}
-
-	function afterAll(){
-		cleanUserFixture();
-		super.afterAll();
-	}
-
-	function cleanUserFixture(){
-		query.from( "users" )
-			.where( "username", "=", "testuser" )
-			.delete();
-	}
-
-	/*********************************** BDD SUITES ***********************************/
-	
-	function run(){
-
-		describe( "Rant Suite", function(){
+describe( "User Suite", function(){
 			
-			it( "can create the Rant", function(){
-				
-				expect(	model ).toBeComponent();
-				
-			});
+    it( "can create the User", function(){
+        expect( model ).toBeComponent();
+    });
 
-			it( "should getUser", function(){
-				var oUser = model.getUser();
-
-				expect( oUser.getId() ).toBe( testUserId );
-			});
-
-
-		});
-
-	}
-
-}
+});
 ```
 
-### 10.3 - Create `RantService.cfc`
+### 10.3 - Create RantService.cfc
 
 Let's create our rant service and work on it with a few methods: `getAll(),create(),new()`
 
